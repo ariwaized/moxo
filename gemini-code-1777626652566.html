@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>סימולציית קשב מתקדמת - מודל מוקסו</title>
+    <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            width: 100vw;
+            height: 100vh;
+            overflow: hidden;
+            font-family: system-ui, -apple-system, sans-serif;
+            background-color: #121212;
+            color: #ecf0f1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .container {
+            width: 95%;
+            max-width: 1000px;
+            height: 90%;
+            background: #1e1e1e;
+            padding: 20px;
+            border-radius: 15px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.9);
+            display: flex;
+            flex-direction: column;
+            position: relative;
+        }
+
+        h1 {
+            text-align: center;
+            margin-top: 0;
+            color: #4fc3f7;
+        }
+
+        #instructionsPanel {
+            background: #2c2c2c;
+            padding: 30px;
+            border-radius: 10px;
+            font-size: 1.2em;
+            line-height: 1.6;
+            text-align: center;
+            margin: auto;
+            max-width: 700px;
+            border: 1px solid #444;
+        }
+
+        #gameArea {
+            flex-grow: 1;
+            background-color: #e0e0e0;
+            border-radius: 10px;
+            position: relative;
+            display: none; 
+            overflow: hidden;
+            box-shadow: inset 0 0 30px rgba(0,0,0,0.6);
+        }
+
+        /* עיצוב הצורות החדשות (סמלי קלפים) */
+        .shape {
+            display: none;
+            position: absolute;
+            font-size: 110px;
+            line-height: 1;
+            transform: translate(-50%, -50%);
+            user-select: none;
+            text-shadow: 2px 2px 5px rgba(0,0,0,0.3);
+        }
+
+        button {
+            padding: 15px 40px;
+            font-size: 22px;
+            font-weight: bold;
+            background-color: #0288d1;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+            display: block;
+            margin: 30px auto 0;
+        }
+
+        button:hover { background-color: #0277bd; }
+
+        #progressInfo {
+            position: absolute;
+            bottom: 15px;
+            right: 20px;
+            color: #666;
+            font-weight: bold;
+            font-size: 18px;
+            z-index: 10;
+        }
+
+        #report {
+            display: none;
+            background: #f5f5f5;
+            color: #2c3e50;
+            padding: 30px;
+            border-radius: 10px;
+            overflow-y: auto;
+            height: 100%;
+        }
+
+        .metric {
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            border-right: 5px solid #0288d1;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        
+        .symbol-demo {
+            font-size: 40px;
+            vertical-align: middle;
+            margin: 0 5px;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <div id="instructionsPanel">
+            <h1>מבחן קשב וזיהוי חזותי</h1>
+            <p><strong>הוראות המבחן:</strong></p>
+            <ul style="text-align: right; display: inline-block;">
+                <li>לחץ על <strong>מקש הרווח (Space)</strong> פעם אחת בלבד רק כשמופיע <span class="symbol-demo" style="color: black;">♠</span> <strong>(עלה שחור)</strong>.</li>
+                <li>אל תלחץ אם מופיע סמל בצבע אחר (למשל <span class="symbol-demo" style="color: red;">♠</span> אדום) או סמל אחר (למשל <span class="symbol-demo" style="color: black;">♦</span> מעוין שחור).</li>
+                <li>הסמלים יופיעו במקומות אקראיים על המסך.</li>
+                <li><strong>ברקע יושמעו רעשים מסיחים חזקים</strong> (אמבולנסים, רכבים חולפים, רעשים פתאומיים). עליך להתעלם מהם לחלוטין ולשמור על ריכוז במשימה.</li>
+            </ul>
+            <button onclick="startGame()" id="startBtn">התחל מבחן</button>
+        </div>
+
+        <div id="gameArea">
+            <div id="stimulus" class="shape"></div>
+            <div id="progressInfo"></div>
+        </div>
+
+        <div id="report">
+            <h2 style="text-align: center; color: #0288d1;">📊 דוח תוצאות מפורט</h2>
+            <div id="reportContent"></div>
+            <button onclick="location.reload()">בצע מבחן חוזר</button>
+        </div>
+    </div>
+
+    <script>
+        const TOTAL_TRIALS = 100; 
+        const TARGET_RATIO = 0.30; 
+        const DISPLAY_TIME = 450; // זמן תצוגה קצר להקשות על הזיהוי
+        const MIN_INTERVAL = 700; 
+        const MAX_INTERVAL = 2000; 
+
+        // מאגר הסמלים והצבעים
+        const STIMULI_POOL = [
+            { char: '♠', color: 'black', isTarget: true },  // המטרה
+            { char: '♠', color: '#d32f2f', isTarget: false }, // מסיח: צורה נכונה, צבע לא נכון (אדום)
+            { char: '♦', color: 'black', isTarget: false }, // מסיח: צורה שגויה, צבע נכון (שחור)
+            { char: '♦', color: '#d32f2f', isTarget: false }, // מסיח: צורה שגויה, צבע שגוי
+            { char: '♣', color: 'black', isTarget: false }, // מסיח: צורה דומה (תלתן שחור)
+            { char: '♥', color: '#d32f2f', isTarget: false }  // מסיח: לב אדום
+        ];
+
+        let currentTrial = 0;
+        let isTargetOnScreen = false;
+        let stimulusAppearTime = 0;
+        let timeoutIds = [];
+        let pressesInCurrentTrial = 0;
+        let isTestRunning = false;
+        
+        let audioContext = null;
+
+        let stats = {
+            targetsShown: 0,
+            distractorsShown: 0,
+            correctHits: 0,
+            omissions: 0,
+            commissions: 0,
+            hyperactivity: 0,
+            reactionTimes: []
+        };
+
+        const stimulusEl = document.getElementById('stimulus');
+        const gameArea = document.getElementById('gameArea');
+        const progressInfo = document.getElementById('progressInfo');
+
+        // ---- מחולל רעשים מותאם (אמבולנס, רכב, מכה) ----
+        
+        // יצירת רעש חזק ופתאומי
+        function playLoudBang() {
+            if (!audioContext || !isTestRunning) return;
+            const duration = 0.8;
+            const bufferSize = audioContext.sampleRate * duration;
+            const buffer = audioContext.createBuffer(1, bufferSize, audioContext.sampleRate);
+            const data = buffer.getChannelData(0);
+            
+            // יצירת רעש לבן צפוף
+            for (let i = 0; i < bufferSize; i++) {
+                data[i] = (Math.random() * 2 - 1) * 0.8; 
+            }
+            
+            const noise = audioContext.createBufferSource();
+            noise.buffer = buffer;
+            
+            // פילטר נמוך כדי שיישמע כמו חבטה/נפילה ולא סתם שריקה
+            const filter = audioContext.createBiquadFilter();
+            filter.type = 'lowpass';
+            filter.frequency.value = 800;
+
+            const gainNode = audioContext.createGain();
+            // התחלה חזקה ודעיכה מהירה
+            gainNode.gain.setValueAtTime(1, audioContext.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + duration);
+            
+            noise.connect(filter);
+            filter.connect(gainNode);
+            gainNode.connect(audioContext.destination);
+            noise.start();
+        }
+
+        // יצירת סירנת אמבולנס
+        function playAmbulance() {
+            if (!audioContext || !isTestRunning) return;
+            const duration = 4; // נמשך 4 שניות
+            const osc = audioContext.createOscillator();
+            const gainNode = audioContext.createGain();
+            
+            osc.type = 'square';
+            
+            // החלפת תדרים כל חצי שנייה (דימוי סירנה אירופאית/ישראלית)
+            for (let i = 0; i < duration; i += 0.5) {
+                osc.frequency.setValueAtTime(700, audioContext.currentTime + i);
+                if (i + 0.25 < duration) {
+                    osc.frequency.setValueAtTime(950, audioContext.currentTime + i + 0.25);
+                }
+            }
+            
+            gainNode.gain.setValueAtTime(0, audioContext.currentTime);
+            gainNode.gain.linearRampToValueAtTime(0.15, audioContext.currentTime + 0.5); // מתגבר
+            gainNode.gain.setValueAtTime(0.15, audioContext.currentTime + duration - 0.5);
+            gainNode.gain.linearRampToValueAtTime(0, audioContext.currentTime + duration); // דועך
+            
+            osc.connect(gainNode);
+            gainNode.connect(audioContext.destination);
+            osc.start();
+            osc.stop(audioContext.currentTime + duration);
+        }
+
+        // יצירת צליל רכב חולף
+        function playPassingCar() {
+            if (!audioContext || !isTestRunning) return;
+            const duration = 3.5;
+            const osc = audioContext.createOscillator();
+            const filter = audioContext.createBiquadFilter();
+            const gainNode = audioContext.createGain();
+            
+            osc.type = 'sawtooth';
+            // תדר נמוך מאוד (מנוע) שמשתנה מעט (דופלר)
+            osc.frequency.setValueAtTime(80, audioContext.currentTime);
+            osc.frequency.linearRampToValueAtTime(60, audioContext.currentTime + duration);
+            
+            filter.type = 'lowpass';
+            filter.frequency.setValueAtTime(300, audioContext.currentTime);
+            
+            // עוצמה: מתחיל שקט, מתחזק במרכז, ודועך (מדמה מעבר)
+            gainNode.gain.setValueAtTime(0.01, audioContext.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.4, audioContext.currentTime + (duration/2));
+            gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + duration);
+            
+            osc.connect(filter);
+            filter.connect(gainNode);
+            gainNode.connect(audioContext.destination);
+            osc.start();
+            osc.stop(audioContext.currentTime + duration);
+        }
+
+        // מפעיל רעש אקראי מתוך ה-3
+        function triggerRandomNoise() {
+            if (!isTestRunning) return;
+            const rand = Math.random();
+            if (rand < 0.33) {
+                playLoudBang();
+            } else if (rand < 0.66) {
+                playAmbulance();
+            } else {
+                playPassingCar();
+            }
+
+            // קביעת זמן לרעש הבא (בין 2 ל-6 שניות חופש)
+            const nextNoiseDelay = Math.random() * 4000 + 2000;
+            timeoutIds.push(setTimeout(triggerRandomNoise, nextNoiseDelay));
+        }
+
+        // ---- לוגיקת המשחק ----
+
+        window.addEventListener('keydown', function(e) {
+            if (e.code === 'Space' || e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                e.preventDefault(); 
+            }
+            if (e.code === 'Space' && isTestRunning) {
+                handleKeyPress();
+            }
+        });
+
+        function handleKeyPress() {
+            pressesInCurrentTrial++;
+
+            if (pressesInCurrentTrial > 1) {
+                stats.hyperactivity++;
+                return;
+            }
+
+            if (isTargetOnScreen && stimulusEl.dataset.isTarget === 'true') {
+                stats.correctHits++;
+                const rt = Date.now() - stimulusAppearTime;
+                stats.reactionTimes.push(rt);
+            } else if (isTargetOnScreen && stimulusEl.dataset.isTarget === 'false') {
+                stats.commissions++; // לחץ על מסיח
+            } else {
+                stats.hyperactivity++; // לחץ על חלל ריק
+            }
+        }
+
+        function startGame() {
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            document.getElementById('instructionsPanel').style.display = 'none';
+            gameArea.style.display = 'block'; 
+            progressInfo.style.display = 'block';
+            isTestRunning = true;
+            
+            // התחלת מחזור הרעשים
+            setTimeout(triggerRandomNoise, 1500); 
+            nextTrial();
+        }
+
+        function setRandomPosition() {
+            const rect = gameArea.getBoundingClientRect();
+            const padding = 80; 
+            const maxX = rect.width - (padding * 2);
+            const maxY = rect.height - (padding * 2);
+            
+            const randomX = Math.floor(Math.random() * maxX) + padding;
+            const randomY = Math.floor(Math.random() * maxY) + padding;
+            
+            stimulusEl.style.left = randomX + 'px';
+            stimulusEl.style.top = randomY + 'px';
+        }
+
+        function nextTrial() {
+            if (currentTrial >= TOTAL_TRIALS) {
+                endTest();
+                return;
+            }
+
+            isTargetOnScreen = false;
+            stimulusEl.style.display = 'none';
+            pressesInCurrentTrial = 0; 
+            progressInfo.innerText = `${currentTrial + 1} / ${TOTAL_TRIALS}`;
+
+            const waitTime = Math.floor(Math.random() * (MAX_INTERVAL - MIN_INTERVAL + 1)) + MIN_INTERVAL;
+            timeoutIds.push(setTimeout(showStimulus, waitTime));
+        }
+
+        function showStimulus() {
+            currentTrial++;
+            isTargetOnScreen = true;
+            stimulusAppearTime = Date.now();
+            pressesInCurrentTrial = 0; 
+
+            setRandomPosition();
+
+            const isTarget = Math.random() < TARGET_RATIO;
+            let selectedStimulus;
+
+            if (isTarget) {
+                selectedStimulus = STIMULI_POOL[0]; // המטרה (עלה שחור)
+                stats.targetsShown++;
+            } else {
+                // בחירת מסיח אקראי (מאינדקס 1 עד הסוף)
+                const distractorIndex = Math.floor(Math.random() * (STIMULI_POOL.length - 1)) + 1;
+                selectedStimulus = STIMULI_POOL[distractorIndex];
+                stats.distractorsShown++;
+            }
+
+            // החלת התכונות על האלמנט
+            stimulusEl.innerText = selectedStimulus.char;
+            stimulusEl.style.color = selectedStimulus.color;
+            stimulusEl.dataset.isTarget = selectedStimulus.isTarget;
+
+            stimulusEl.style.display = 'block';
+            timeoutIds.push(setTimeout(hideStimulus, DISPLAY_TIME));
+        }
+
+        function hideStimulus() {
+            const wasTarget = stimulusEl.dataset.isTarget === 'true';
+            stimulusEl.style.display = 'none';
+            isTargetOnScreen = false;
+
+            if (wasTarget && pressesInCurrentTrial === 0) {
+                timeoutIds.push(setTimeout(() => {
+                    if (pressesInCurrentTrial === 0) stats.omissions++;
+                }, 300));
+            }
+
+            timeoutIds.push(setTimeout(nextTrial, 350)); 
+        }
+
+        function endTest() {
+            isTestRunning = false;
+            timeoutIds.forEach(clearTimeout);
+            timeoutIds = [];
+            gameArea.style.display = 'none';
+            generateReport();
+        }
+
+        function generateReport() {
+            const avgRT = stats.reactionTimes.length > 0 
+                ? Math.round(stats.reactionTimes.reduce((a, b) => a + b, 0) / stats.reactionTimes.length) 
+                : 0;
+
+            const omissionRate = Math.round((stats.omissions / stats.targetsShown) * 100) || 0;
+
+            let reportHTML = `
+                <div class="metric">
+                    <h3>1. קשב (Omissions) - פספוס מטרות</h3>
+                    <p>החמצת ${stats.omissions} מטרות (עלה שחור) מתוך ${stats.targetsShown} שהופיעו (${omissionRate}% פספוס).</p>
+                    <p><small>מעיד על היכולת לשמור על קשב רציף לאורך זמן, במיוחד תחת עומס רעשים.</small></p>
+                </div>
+                <div class="metric">
+                    <h3>2. אימפולסיביות (Commissions) - לחיצה שגויה</h3>
+                    <p>נרשמו ${stats.commissions} לחיצות על מסיחים (כגון עלה אדום או מעוין שחור).</p>
+                    <p><small>מעיד על קושי לעכב תגובה. המוח זיהה "שחור" או "עלה" ולחץ לפני עיבוד מלא של הנתונים.</small></p>
+                </div>
+                <div class="metric">
+                    <h3>3. היפראקטיביות</h3>
+                    <p>נרשמו ${stats.hyperactivity} לחיצות מיותרות (כפולות או באוויר).</p>
+                </div>
+                <div class="metric">
+                    <h3>4. מהירות עיבוד</h3>
+                    <p>זמן תגובה ממוצע לתשובה נכונה: ${avgRT} מילישניות.</p>
+                </div>
+            `;
+
+            document.getElementById('reportContent').innerHTML = reportHTML;
+            document.getElementById('report').style.display = 'block';
+        }
+    </script>
+</body>
+</html>
